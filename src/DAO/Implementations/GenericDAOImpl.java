@@ -6,8 +6,10 @@ package DAO.Implementations;
 //
 
 import DAO.Interface.GenericDAO;
+import config.DBConfig;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -24,62 +26,51 @@ public class GenericDAOImpl<T> implements GenericDAO<T> {
         this.tableName = tableName;
     }
 
-    public void insert(T entity) {
-        Connection conn = null;
-        PreparedStatement pstmt = null;
+    private Connection getConnection() throws SQLException {
+        return DBConfig.getConnection();
+    }
 
-        try {
-            conn = this.getConnection();
-            String sql = this.generateInsertSQL(entity);
-            if (conn != null) {
-                pstmt = conn.prepareStatement(sql);
+    public void insert(T entity) {
+
+        try (Connection conn = this.getConnection();
+             PreparedStatement pstmt = conn != null ? conn.prepareStatement(this.generateInsertSQL(entity)) : null) {
+
+            if (conn != null && pstmt != null) {
                 this.setParameters(pstmt, entity, false);
                 pstmt.executeUpdate();
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            this.close(conn, pstmt, (ResultSet)null);
+        } catch (SQLException | IllegalAccessException e) {
+            System.err.println("insert error：" + e.getMessage());
         }
 
     }
 
     public void update(T entity) {
-        Connection conn = null;
-        PreparedStatement pstmt = null;
 
-        try {
-            conn = this.getConnection();
-            String sql = this.generateUpdateSQL(entity);
-            if (conn != null) {
-                pstmt = conn.prepareStatement(sql);
+        try (Connection conn = this.getConnection();
+             PreparedStatement pstmt = conn != null ? conn.prepareStatement(this.generateUpdateSQL(entity)) : null) {
+
+            if (conn != null && pstmt != null) {
                 this.setParameters(pstmt, entity, true);
                 pstmt.executeUpdate();
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            this.close(conn, pstmt, (ResultSet)null);
+        } catch (SQLException | IllegalAccessException e) {
+            System.err.println("update error：" + e.getMessage());
         }
 
     }
 
     public void delete(T entity) {
-        Connection conn = null;
-        PreparedStatement pstmt = null;
 
-        try {
-            conn = this.getConnection();
-            String sql = "DELETE FROM " + this.tableName + " WHERE id = ?";
-            if (conn != null) {
-                pstmt = conn.prepareStatement(sql);
+        try (Connection conn = this.getConnection();
+             PreparedStatement pstmt = conn != null ? conn.prepareStatement("DELETE FROM " + this.tableName + " WHERE id = ?") : null) {
+
+            if (conn != null && pstmt != null) {
                 pstmt.setInt(1, this.getEntityId(entity));
                 pstmt.executeUpdate();
             }
         } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            this.close(conn, pstmt, (ResultSet)null);
+            System.err.println("delete error：" + e.getMessage());
         }
 
     }
@@ -94,41 +85,33 @@ public class GenericDAOImpl<T> implements GenericDAO<T> {
     }
 
     public List<T> selectByCondition(String condition, Object... params) {
-        Connection conn = null;
-        PreparedStatement pstmt = null;
-        ResultSet rs = null;
-        List<T> list = new ArrayList();
+        List<T> list = new ArrayList<>();
+        String sql = "SELECT * FROM " + this.tableName; // 假设类中有tableName字段
+        if (condition != null && !condition.isEmpty()) {
+            sql += " WHERE " + condition;
+        }
 
-        try {
-            conn = this.getConnection();
-            String var10000 = this.tableName;
-            String sql = "SELECT * FROM " + var10000 + (condition != null ? " WHERE " + condition : "");
-            if (conn != null) {
-                pstmt = conn.prepareStatement(sql);
+        try (Connection conn = this.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-                for(int i = 0; i < params.length; ++i) {
-                    pstmt.setObject(i + 1, params[i]);
-                }
-
-                rs = pstmt.executeQuery();
+            for (int i = 0; i < params.length; ++i) {
+                pstmt.setObject(i + 1, params[i]);
             }
 
-            if (rs != null) {
-                while(rs.next()) {
-                    T instance = (T)this.entityClass.getDeclaredConstructor().newInstance();
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    T instance = entityClass.getDeclaredConstructor().newInstance();
 
-                    for(Field field : this.entityClass.getDeclaredFields()) {
+                    for (Field field : entityClass.getDeclaredFields()) {
                         field.setAccessible(true);
                         field.set(instance, rs.getObject(field.getName()));
                     }
-
                     list.add(instance);
                 }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            this.close(conn, pstmt, rs);
+        } catch (SQLException | NoSuchMethodException | InstantiationException | IllegalAccessException |
+                 InvocationTargetException e) {
+            System.err.println("selectByCondition error：" + e.getMessage());
         }
 
         return list;
@@ -192,9 +175,6 @@ public class GenericDAOImpl<T> implements GenericDAO<T> {
         throw new RuntimeException("Entity does not have an id field");
     }
 
-    private Connection getConnection() throws SQLException {
-        return null;
-    }
 
     private void close(Connection conn, PreparedStatement stmt, ResultSet rs) {
         try {
@@ -210,7 +190,7 @@ public class GenericDAOImpl<T> implements GenericDAO<T> {
                 conn.close();
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("conn close error：" + e.getMessage());
         }
 
     }
